@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Neon Run 3D</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: linear-gradient(#050816, #111a3a);
+      font-family: Arial, sans-serif;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    .hud {
+      position: fixed;
+      top: 10px;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      color: white;
+      font-size: 18px;
+      padding: 0 16px;
+      box-sizing: border-box;
+      text-shadow: 0 0 8px rgba(0,255,255,.8);
+      z-index: 2;
+      pointer-events: none;
+    }
+    .centerMsg {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 24px;
+      text-align: center;
+      background: rgba(0,0,0,.35);
+      z-index: 3;
+    }
+    .panel {
+      background: rgba(10,15,30,.85);
+      border: 1px solid rgba(0,255,255,.3);
+      padding: 20px 24px;
+      border-radius: 16px;
+      box-shadow: 0 0 20px rgba(0,255,255,.15);
+      max-width: 320px;
+    }
+    .btn {
+      margin-top: 14px;
+      display: inline-block;
+      background: #00d4ff;
+      color: #00111f;
+      font-weight: bold;
+      padding: 10px 18px;
+      border-radius: 12px;
+    }
+    .hint {
+      position: fixed;
+      bottom: 14px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      color: rgba(255,255,255,.75);
+      font-size: 14px;
+      z-index: 2;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div id="score">Счёт: 0</div>
+    <div id="coins">Монеты: 0</div>
+  </div>
+
+  <div id="message" class="centerMsg">
+    <div class="panel">
+      <div id="msgTitle">Neon Run 3D</div>
+      <div style="font-size:16px; margin-top:10px; line-height:1.4;">
+        Свайпы: ← → смена полосы<br>
+        ↑ прыжок, ↓ подкат
+      </div>
+      <div class="btn">Нажми, чтобы начать</div>
+    </div>
+  </div>
+
+  <div class="hint">Свайпами управляй героем</div>
+
+  <canvas id="game"></canvas>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const coinsEl = document.getElementById("coins");
+    const messageEl = document.getElementById("message");
+    const msgTitle = document.getElementById("msgTitle");
+
+    let W, H, cx, cy;
+    function resize() {
+      W = canvas.width = window.innerWidth * devicePixelRatio;
+      H = canvas.height = window.innerHeight * devicePixelRatio;
+      cx = W / 2;
+      cy = H / 2;
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    const lanes = [-1, 0, 1];
+    const player = {
+      lane: 1,
+      y: 0,
+      targetY: 0,
+      jumpVel: 0,
+      jumping: false,
+      sliding: false,
+      slideTime: 0
+    };
+
+    let started = false;
+    let gameOver = false;
+    let score = 0;
+    let coins = 0;
+    let speed = 12;
+    let spawnTimer = 0;
+    let coinTimer = 0;
+    let obstacles = [];
+    let pickups = [];
+    let roadOffset = 0;
+
+    function laneX(laneIndex) {
+      return cx + lanes[laneIndex] * (W * 0.14);
+    }
+
+    function resetGame() {
+      player.lane = 1;
+      player.y = 0;
+      player.targetY = 0;
+      player.jumpVel = 0;
+      player.jumping = false;
+      player.sliding = false;
+      player.slideTime = 0;
+      started = true;
+      gameOver = false;
+      score = 0;
+      coins = 0;
+      speed = 12;
+      spawnTimer = 0;
+      coinTimer = 0;
+      obstacles = [];
+      pickups = [];
+      roadOffset = 0;
+      messageEl.style.display = "none";
+    }
+
+    function endGame() {
+      gameOver = true;
+      started = false;
+      msgTitle.textContent = "Игра окончена";
+      messageEl.querySelector(".panel").innerHTML = `
+        <div id="msgTitle">Игра окончена</div>
+        <div style="font-size:16px; margin-top:10px; line-height:1.4;">
+          Счёт: ${Math.floor(score)}<br>
+          Монеты: ${coins}
+        </div>
+        <div class="btn">Сыграть снова</div>
+      `;
+      messageEl.style.display = "flex";
+      messageEl.onclick = () => {
+        messageEl.onclick = null;
+        messageEl.querySelector(".panel").innerHTML = `
+          <div id="msgTitle">Neon Run 3D</div>
+          <div style="font-size:16px; margin-top:10px; line-height:1.4;">
+            Свайпы: ← → смена полосы<br>
+            ↑ прыжок, ↓ подкат
+          </div>
+          <div class="btn">Нажми, чтобы начать</div>
+        `;
+        resetGame();
+      };
+    }
+
+    function spawnObstacle() {
+      const lane = Math.floor(Math.random() * 3);
+      obstacles.push({
+        lane,
+        z: 1,
+        type: Math.random() < 0.5 ? "barrier" : "block"
+      });
+    }
+
+    function spawnCoinRow() {
+      const lane = Math.floor(Math.random() * 3);
+      pickups.push({
+        lane,
+        z: 1
+      });
+    }
+
+    function drawRoad() {
+      ctx.fillStyle = "#08101f";
+      ctx.fillRect(0, 0, W, H);
+
+      const horizon = H * 0.28;
+      const roadTop = H * 0.33;
+      const roadBottom = H;
+
+      // glow sky
+      const grad = ctx.createRadialGradient(cx, horizon, 10, cx, horizon, H * 0.8);
+      grad.addColorStop(0, "rgba(0,255,255,0.12)");
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // road
+      ctx.fillStyle = "#121829";
+      ctx.beginPath();
+      ctx.moveTo(W * 0.28, roadTop);
+      ctx.lineTo(W * 0.72, roadTop);
+      ctx.lineTo(W, roadBottom);
+      ctx.lineTo(0, roadBottom);
+      ctx.closePath();
+      ctx.fill();
+
+      // lane lines
+      ctx.strokeStyle = "rgba(0,255,255,0.35)";
+      ctx.lineWidth = 3 * devicePixelRatio;
+      for (let i = 1; i <= 2; i++) {
+        const x1 = W * (0.28 + i * 0.147);
+        const x2 = W * (0.28 + i * 0.11);
+        ctx.beginPath();
+        for (let y = roadTop; y < H; y += 28 * devicePixelRatio) {
+          const t = (y - roadTop) / (H - roadTop);
+          const x = x1 + (x2 - x1) * t;
+          ctx.moveTo(x, y + roadOffset % (28 * devicePixelRatio));
+          ctx.lineTo(x, y + 14 * devicePixelRatio + roadOffset % (28 * devicePixelRatio));
+        }
+        ctx.stroke();
+      }
+    }
+
+    function drawPlayer() {
+      const baseX = laneX(player.lane);
+      const base
